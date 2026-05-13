@@ -1,0 +1,13 @@
+# Render.com service definition for the SnapLoad API.
+services:
+  - type: web
+    name: snapload-api
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_KEY
+        generateValue: true

@@ -1,0 +1,32 @@
+{
+  "name": "snapload-api",
+  "version": "1.0.0",
+  "description": "Standalone Express API that extracts video metadata and direct CDN URLs with yt-dlp.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "build": "echo \"No build step required\""
+  },
+  "keywords": [
+    "snapload",
+    "express",
+    "yt-dlp"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "yt-dlp-exec": "^1.0.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
