@@ -1,9 +1,14 @@
-// Wraps yt-dlp-exec and normalizes extractor metadata into the SnapLoad API response shape.
-const ytDlp = require('yt-dlp-exec');
+// Runs yt-dlp and normalizes extractor metadata into the SnapLoad API response shape.
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 
 const { formatDuration } = require('../utils/formatDuration');
 const { formatSize } = require('../utils/formatSize');
 const { detectPlatform } = require('../utils/detectPlatform');
+
+const execFileAsync = promisify(execFile);
+const YT_DLP_BINARY = process.env.YT_DLP_PATH || 'yt-dlp';
+const YT_DLP_TIMEOUT_MS = Number(process.env.YT_DLP_TIMEOUT_MS) || 30000;
 
 const QUALITY_LABELS = new Map([
   [2160, '4K'],
@@ -103,7 +108,11 @@ function buildFallbackFormat(info) {
 }
 
 function mapYtDlpError(error) {
-  const message = String(error && (error.stderr || error.message || error)).toLowerCase();
+  const message = String(error && (error.stderr || error.stdout || error.message || error)).toLowerCase();
+
+  if (message.includes('enoent') || message.includes('not found')) {
+    return 'yt-dlp is not installed on the server';
+  }
 
   if (message.includes('sign in')) {
     return 'This video requires login';
@@ -128,20 +137,32 @@ function mapYtDlpError(error) {
   return 'Could not extract video. Try again.';
 }
 
+async function runYtDlp(url) {
+  const args = [
+    url,
+    '--dump-single-json',
+    '--no-warnings',
+    '--no-call-home',
+    '--no-check-certificate',
+    '--prefer-free-formats',
+    '--youtube-skip-dash-manifest',
+    '--add-header',
+    'referer:youtube.com',
+    '--add-header',
+    'user-agent:Mozilla/5.0'
+  ];
+
+  const { stdout } = await execFileAsync(YT_DLP_BINARY, args, {
+    timeout: YT_DLP_TIMEOUT_MS,
+    maxBuffer: 10 * 1024 * 1024
+  });
+
+  return JSON.parse(stdout);
+}
+
 async function extractVideoInfo(url, options = {}) {
   try {
-    const info = await ytDlp(url, {
-      dumpSingleJson: true,
-      noWarnings: true,
-      noCallHome: true,
-      noCheckCertificate: true,
-      preferFreeFormats: true,
-      youtubeSkipDashManifest: true,
-      addHeader: [
-        'referer:youtube.com',
-        'user-agent:Mozilla/5.0'
-      ]
-    });
+    const info = await runYtDlp(url);
 
     const rawFormats = Array.isArray(info.formats) ? info.formats : [];
     const videoFormats = buildVideoFormats(rawFormats);
