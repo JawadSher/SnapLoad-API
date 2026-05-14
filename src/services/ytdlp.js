@@ -333,9 +333,11 @@ function buildYtDlpArgs(url, playerClient) {
   const args = [
     url,
     '--dump-single-json',
+    '--skip-download',
     '--no-warnings',
     '--no-check-certificate',
-    '--prefer-free-formats',
+    '--ignore-no-formats-error',
+    '--no-check-formats',
     '--extractor-args',
     `youtube:player_client=${playerClient}`,
     '--extractor-args',
@@ -362,7 +364,13 @@ async function runYtDlpWithArgs(args) {
     maxBuffer: 10 * 1024 * 1024
   });
 
-  return JSON.parse(stdout);
+  const info = JSON.parse(stdout);
+
+  if (!info) {
+    throw new Error('yt-dlp returned no video information');
+  }
+
+  return info;
 }
 
 async function runYtDlp(url, isYouTube = false) {
