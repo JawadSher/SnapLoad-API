@@ -164,6 +164,22 @@ function buildFormatLabel(format) {
   return `${format.quality} ${ext}`;
 }
 
+function addDownloadUrls(formats, pageUrl) {
+  return formats.map((format) => {
+    const params = new URLSearchParams({
+      url: pageUrl,
+      quality: format.quality,
+      format: format.isAudio ? 'mp3' : 'mp4',
+      audioOnly: String(format.isAudio)
+    });
+
+    return {
+      ...format,
+      downloadUrl: `/api/download?${params.toString()}`
+    };
+  });
+}
+
 function sortMediaFormats(a, b) {
   const aRank = a.hasVideo && a.hasAudio ? 0 : a.hasVideo ? 1 : 2;
   const bRank = b.hasVideo && b.hasAudio ? 0 : b.hasVideo ? 1 : 2;
@@ -362,7 +378,8 @@ async function extractVideoInfo(url, options = {}) {
     console.log(videoId ? 'yt-dlp YouTube fallback layer succeeded' : 'yt-dlp layer succeeded');
 
     const rawFormats = Array.isArray(info.formats) ? info.formats : [];
-    const formats = buildMediaFormats(rawFormats);
+    const pageUrl = info.webpage_url || info.original_url || url;
+    const formats = addDownloadUrls(buildMediaFormats(rawFormats), pageUrl);
 
     if (formats.length === 0) {
       return {

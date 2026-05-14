@@ -10,6 +10,7 @@ const helmet = require("helmet");
 const pingRoute = require("./routes/ping");
 const extractRoute = require("./routes/extract");
 const infoRoute = require("./routes/info");
+const downloadRoute = require("./routes/download");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -66,6 +67,11 @@ app.get("/", (req, res) => {
         path: "/api/info?url=VIDEO_URL",
         description: "Extract video metadata and default formats",
       },
+      {
+        method: "GET",
+        path: "/api/download?url=VIDEO_URL&quality=best&format=mp4&audioOnly=false",
+        description: "Stream a video page URL through yt-dlp as an attachment",
+      },
     ],
   });
 });
@@ -88,6 +94,7 @@ app.use("/ping", pingRoute);
 app.use("/api", apiKeyMiddleware);
 app.use("/api/extract", extractRoute);
 app.use("/api/info", infoRoute);
+app.use("/api/download", downloadRoute);
 
 app.use((req, res) => {
   res.status(404).json({
