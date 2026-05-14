@@ -6,14 +6,27 @@ const express = require('express');
 const {
   deleteTempFile,
   deleteTempFileById,
-  findTempFile,
-  getContentType
+  findTempFile
 } = require('../utils/tempFiles');
 
 const router = express.Router();
 
 function getDownloadFilename(filePath) {
-  return path.extname(filePath).toLowerCase() === '.mp3' ? 'snapload.mp3' : 'snapload.mp4';
+  const ext = path.extname(filePath).toLowerCase() || '.mp4';
+  return ext === '.mp3' || ext === '.m4a' || ext === '.opus' ? `snapload-audio${ext}` : `snapload-video${ext}`;
+}
+
+function getContentType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+
+  if (ext === '.mp4') return 'video/mp4';
+  if (ext === '.webm') return 'video/webm';
+  if (ext === '.mkv') return 'video/x-matroska';
+  if (ext === '.mp3') return 'audio/mpeg';
+  if (ext === '.m4a') return 'audio/mp4';
+  if (ext === '.opus') return 'audio/ogg';
+
+  return 'application/octet-stream';
 }
 
 router.get('/:fileId', async (req, res, next) => {

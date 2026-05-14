@@ -1,20 +1,20 @@
 // Runs a temp-file yt-dlp download and streams progress events over SSE.
 const { spawn } = require('child_process');
 const fs = require('fs');
+const path = require('path');
 const express = require('express');
 
 const {
   deleteTempFileById,
-  findTempFile,
   formatFileSize,
   getOutputTemplate
 } = require('../utils/tempFiles');
+const { buildYouTubeArgs, writeCookiesFile } = require('../services/ytdlp');
 
 const router = express.Router();
 
 const RENDER_YTDLP_PATH = '/opt/render/project/src/yt-dlp';
-const SYSTEM_YTDLP_PATH = 'yt-dlp';
-const YOUTUBE_EXTRACTOR_ARGS = 'youtube:player_client=default,ios,android,web';
+const TEMP_DIR = '/tmp';
 
 function resolveYtDlpPath() {
   if (process.env.YTDLP_BINARY) {
@@ -29,7 +29,7 @@ function resolveYtDlpPath() {
     return RENDER_YTDLP_PATH;
   }
 
-  return SYSTEM_YTDLP_PATH;
+  return RENDER_YTDLP_PATH;
 }
 
 function isTruthy(value) {
@@ -58,25 +58,53 @@ function createFileId() {
   return `snapload-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function buildYtDlpArgs(url, fileId, audioOnly) {
+function getQualityHeight(quality) {
+  const match = String(quality || '').match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+
+function buildFormatString(quality, audioOnly) {
+  if (audioOnly) {
+    return 'bestaudio/best';
+  }
+
+  const height = getQualityHeight(quality);
+
+  if (height) {
+    return `bestvideo[height<=${height}]+bestaudio/best[height<=${height}]/best`;
+  }
+
+  return 'bestvideo+bestaudio/best';
+}
+
+function findCompletedFile(fileId) {
+  const files = fs.readdirSync(TEMP_DIR);
+  const match = files.find((file) => file.startsWith(fileId));
+  return match ? path.join(TEMP_DIR, match) : null;
+}
+
+function buildYtDlpArgs(url, fileId, formatString, audioOnly, youtubeArgs, cookiesFile) {
   const args = [
     url,
     '--output',
     getOutputTemplate(fileId),
+    '--format',
+    formatString,
+    '--merge-output-format',
+    'mp4',
     '--no-warnings',
     '--no-check-certificate',
     '--progress',
-    '--newline'
+    '--newline',
+    ...youtubeArgs
   ];
 
-  if (isYouTubeUrl(url)) {
-    args.push('--extractor-args', YOUTUBE_EXTRACTOR_ARGS);
+  if (cookiesFile) {
+    args.push('--cookies', cookiesFile);
   }
 
   if (audioOnly) {
     args.push('--extract-audio', '--audio-format', 'mp3');
-  } else {
-    args.push('--format', 'bestvideo+bestaudio/best');
   }
 
   return args;
@@ -130,7 +158,7 @@ function handleProgressChunk(chunk, state, onLine) {
 }
 
 router.get('/', (req, res) => {
-  const { url } = req.query;
+  const { url, quality } = req.query;
   const audioOnly = isTruthy(req.query.audioOnly) || String(req.query.format || '').toLowerCase() === 'mp3';
 
   if (!url) {
@@ -150,7 +178,10 @@ router.get('/', (req, res) => {
   }
 
   const fileId = createFileId();
-  const ytdlpProcess = spawn(resolveYtDlpPath(), buildYtDlpArgs(url, fileId, audioOnly), {
+  const youtubeArgs = isYouTubeUrl(url) ? buildYouTubeArgs() : [];
+  const cookiesFile = isYouTubeUrl(url) ? writeCookiesFile() : null;
+  const formatString = buildFormatString(quality, audioOnly);
+  const ytdlpProcess = spawn(resolveYtDlpPath(), buildYtDlpArgs(url, fileId, formatString, audioOnly, youtubeArgs, cookiesFile), {
     stdio: ['ignore', 'ignore', 'pipe']
   });
   const progressState = { buffer: '' };
@@ -209,7 +240,7 @@ router.get('/', (req, res) => {
       return;
     }
 
-    const filePath = await findTempFile(fileId);
+    const filePath = findCompletedFile(fileId);
 
     if (!filePath) {
       sendSse(res, {
@@ -221,12 +252,13 @@ router.get('/', (req, res) => {
     }
 
     const stats = await fs.promises.stat(filePath);
+    const actualExtension = path.extname(filePath).replace('.', '') || (audioOnly ? 'mp3' : 'mp4');
     completed = true;
 
     sendSse(res, {
       type: 'complete',
       fileId,
-      filename: audioOnly ? 'snapload.mp3' : 'snapload.mp4',
+      filename: audioOnly ? `snapload-audio.${actualExtension}` : `snapload-video.${actualExtension}`,
       fileSize: formatFileSize(stats.size)
     });
     res.end();

@@ -3,16 +3,16 @@ const { execFile, spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const express = require('express');
 
+const { buildYouTubeArgs, writeCookiesFile } = require('../services/ytdlp');
+
 const router = express.Router();
 
 const RENDER_YTDLP_PATH = '/opt/render/project/src/yt-dlp';
-const SYSTEM_YTDLP_PATH = 'yt-dlp';
 
 let ffmpegAvailable;
 
 const YT_DLP_METADATA_TIMEOUT_MS = Number(process.env.YT_DLP_METADATA_TIMEOUT_MS) || 30000;
 const CONTENT_LENGTH_HEAD_TIMEOUT_MS = Number(process.env.CONTENT_LENGTH_HEAD_TIMEOUT_MS) || 8000;
-const YOUTUBE_EXTRACTOR_ARGS = 'youtube:player_client=default,ios,android,web';
 
 function resolveYtDlpPath() {
   if (process.env.YTDLP_BINARY) {
@@ -27,7 +27,7 @@ function resolveYtDlpPath() {
     return RENDER_YTDLP_PATH;
   }
 
-  return SYSTEM_YTDLP_PATH;
+  return RENDER_YTDLP_PATH;
 }
 
 function isTruthy(value) {
@@ -70,37 +70,58 @@ function getFormatSelector(audioOnly) {
   return audioOnly ? 'bestaudio' : 'bestvideo+bestaudio/best';
 }
 
-function buildYtDlpArgs(url, audioOnly) {
+function getQualityHeight(quality) {
+  const match = String(quality || '').match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+
+function buildFormatString(quality, audioOnly) {
+  if (audioOnly) {
+    return 'bestaudio/best';
+  }
+
+  const height = getQualityHeight(quality);
+
+  if (height) {
+    return `bestvideo[height<=${height}]+bestaudio/best[height<=${height}]/best`;
+  }
+
+  return getFormatSelector(false);
+}
+
+function buildYtDlpArgs(url, formatString, youtubeArgs, cookiesFile) {
   const args = [
     url,
     '--output',
     '-',
     '--format',
-    getFormatSelector(audioOnly),
-    '--no-warnings',
-    '--no-check-certificate'
+    formatString,
+    '--merge-output-format',
+    'mp4',
+    ...youtubeArgs
   ];
 
-  if (isYouTubeUrl(url)) {
-    args.push('--extractor-args', YOUTUBE_EXTRACTOR_ARGS);
+  if (cookiesFile) {
+    args.push('--cookies', cookiesFile);
   }
 
   return args;
 }
 
-function buildYtDlpMetadataArgs(url, audioOnly) {
+function buildYtDlpMetadataArgs(url, formatString, youtubeArgs, cookiesFile) {
   const args = [
     url,
     '--dump-single-json',
     '--skip-download',
     '--format',
-    getFormatSelector(audioOnly),
-    '--no-warnings',
-    '--no-check-certificate'
+    formatString,
+    '--merge-output-format',
+    'mp4',
+    ...youtubeArgs
   ];
 
-  if (isYouTubeUrl(url)) {
-    args.push('--extractor-args', YOUTUBE_EXTRACTOR_ARGS);
+  if (cookiesFile) {
+    args.push('--cookies', cookiesFile);
   }
 
   return args;
@@ -184,9 +205,9 @@ async function getExactContentLengthFromInfo(info, convertsWithFfmpeg) {
   return getExactFormatSize(selectedFormats[0]) || getHeadContentLength(selectedFormats[0]);
 }
 
-function getYtDlpMetadata(ytdlpPath, url, audioOnly) {
+function getYtDlpMetadata(ytdlpPath, url, formatString, youtubeArgs, cookiesFile) {
   return new Promise((resolve) => {
-    execFile(ytdlpPath, buildYtDlpMetadataArgs(url, audioOnly), {
+    execFile(ytdlpPath, buildYtDlpMetadataArgs(url, formatString, youtubeArgs, cookiesFile), {
       timeout: YT_DLP_METADATA_TIMEOUT_MS,
       maxBuffer: 10 * 1024 * 1024
     }, (error, stdout) => {
@@ -230,9 +251,9 @@ function killProcess(childProcess) {
 }
 
 router.get('/', async (req, res) => {
-  const { url, format } = req.query;
-  const audioOnly = isTruthy(req.query.audioOnly);
-  const wantsMp3 = audioOnly && String(format || '').toLowerCase() === 'mp3';
+  const { url, format, quality } = req.query;
+  const audioOnly = isTruthy(req.query.audioOnly) || String(format || '').toLowerCase() === 'mp3';
+  const wantsMp3 = audioOnly;
 
   if (!url) {
     return res.status(400).json({
@@ -268,15 +289,18 @@ router.get('/', async (req, res) => {
   });
 
   const ytdlpPath = resolveYtDlpPath();
+  const youtubeArgs = isYouTubeUrl(url) ? buildYouTubeArgs() : ['--no-warnings', '--no-check-certificate'];
+  const cookiesFile = isYouTubeUrl(url) ? writeCookiesFile() : null;
+  const formatString = buildFormatString(quality, audioOnly);
   const convertsWithFfmpeg = wantsMp3 && hasFfmpeg();
-  const metadata = await getYtDlpMetadata(ytdlpPath, url, audioOnly);
+  const metadata = await getYtDlpMetadata(ytdlpPath, url, formatString, youtubeArgs, cookiesFile);
   const contentLength = await getExactContentLengthFromInfo(metadata, convertsWithFfmpeg);
 
   if (clientDisconnected) {
     return undefined;
   }
 
-  ytdlpProcess = spawn(ytdlpPath, buildYtDlpArgs(url, audioOnly), {
+  ytdlpProcess = spawn(ytdlpPath, buildYtDlpArgs(url, formatString, youtubeArgs, cookiesFile), {
     stdio: ['ignore', 'pipe', 'pipe']
   });
   const stderrChunks = [];

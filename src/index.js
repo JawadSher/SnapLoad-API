@@ -1,7 +1,7 @@
 // Bootstraps the Express server, security middleware, API routes, and JSON error handling.
 require("dotenv").config();
 
-const { execFileSync } = require("child_process");
+const { execFileSync, execSync } = require("child_process");
 const fs = require("fs");
 const express = require("express");
 const cors = require("cors");
@@ -137,6 +137,30 @@ app.use((err, req, res, next) => {
   });
 });
 
+function runStartupChecks() {
+  const ytdlpPath = process.env.YTDLP_BINARY || "/opt/render/project/src/yt-dlp";
+
+  if (fs.existsSync(ytdlpPath)) {
+    console.log("✅ yt-dlp binary found:", ytdlpPath);
+  } else {
+    console.error("❌ yt-dlp binary NOT found:", ytdlpPath);
+  }
+
+  if (process.env.YOUTUBE_COOKIES) {
+    console.log("✅ YouTube cookies configured");
+  } else {
+    console.warn("⚠️ YouTube cookies not set. YouTube downloads may fail.");
+  }
+
+  try {
+    execSync("ffmpeg -version", { stdio: "ignore" });
+    console.log("✅ ffmpeg found");
+  } catch (error) {
+    console.warn("⚠️ ffmpeg not found. Format merging may fail.");
+  }
+}
+
+runStartupChecks();
 startTempFileCleanup();
 
 app.listen(PORT, () => {
