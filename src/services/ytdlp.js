@@ -14,6 +14,7 @@ const RENDER_YTDLP_PATH = '/opt/render/project/src/yt-dlp';
 const SYSTEM_YTDLP_PATH = 'yt-dlp';
 const YT_DLP_TIMEOUT_MS = Number(process.env.YT_DLP_TIMEOUT_MS) || 30000;
 const YOUTUBE_COOKIES_PATH = '/tmp/yt-cookies.txt';
+const YOUTUBE_PLAYER_CLIENTS = ['web', 'mweb', 'android', 'ios'];
 
 function resolveYtDlpPath() {
   if (process.env.YTDLP_BINARY) {
@@ -305,8 +306,8 @@ function mapYtDlpError(error) {
     return `yt-dlp binary was not found at ${YTDLP_PATH}`;
   }
 
-  if (message.includes('sign in')) {
-    return 'This video requires login';
+  if (message.includes('sign in') || message.includes('not a bot') || message.includes('cookies')) {
+    return 'YouTube blocked this server request. Add exported YouTube cookies to the YOUTUBE_COOKIES environment variable on Render.';
   }
 
   if (message.includes('unavailable')) {
@@ -328,7 +329,7 @@ function mapYtDlpError(error) {
   return 'Could not extract video. Try again.';
 }
 
-async function runYtDlp(url) {
+function buildYtDlpArgs(url, playerClient) {
   const args = [
     url,
     '--dump-single-json',
@@ -336,7 +337,7 @@ async function runYtDlp(url) {
     '--no-check-certificate',
     '--prefer-free-formats',
     '--extractor-args',
-    'youtube:player_client=web',
+    `youtube:player_client=${playerClient}`,
     '--extractor-args',
     'youtube:player_skip=webpage',
     '--add-header',
@@ -345,17 +346,45 @@ async function runYtDlp(url) {
     'user-agent:Mozilla/5.0'
   ];
 
+  return args;
+}
+
+async function addCookiesArgs(args) {
   if (process.env.YOUTUBE_COOKIES) {
     await fsPromises.writeFile(YOUTUBE_COOKIES_PATH, process.env.YOUTUBE_COOKIES, 'utf8');
     args.push('--cookies', YOUTUBE_COOKIES_PATH);
   }
+}
 
+async function runYtDlpWithArgs(args) {
   const { stdout } = await execFileAsync(YTDLP_PATH, args, {
     timeout: YT_DLP_TIMEOUT_MS,
     maxBuffer: 10 * 1024 * 1024
   });
 
   return JSON.parse(stdout);
+}
+
+async function runYtDlp(url, isYouTube = false) {
+  const playerClients = isYouTube ? YOUTUBE_PLAYER_CLIENTS : ['web'];
+  let lastError;
+
+  for (const playerClient of playerClients) {
+    const args = buildYtDlpArgs(url, playerClient);
+    await addCookiesArgs(args);
+
+    try {
+      const info = await runYtDlpWithArgs(args);
+      console.log(`yt-dlp layer succeeded with player_client=${playerClient}`);
+      return info;
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`yt-dlp failed with player_client=${playerClient}: ${message}`);
+    }
+  }
+
+  throw lastError;
 }
 
 async function extractVideoInfo(url, options = {}) {
@@ -372,7 +401,7 @@ async function extractVideoInfo(url, options = {}) {
       console.log('Invidious layer failed, falling back to yt-dlp layer');
     }
 
-    const info = await runYtDlp(url);
+    const info = await runYtDlp(url, Boolean(videoId));
     console.log(videoId ? 'yt-dlp YouTube fallback layer succeeded' : 'yt-dlp layer succeeded');
 
     const rawFormats = Array.isArray(info.formats) ? info.formats : [];

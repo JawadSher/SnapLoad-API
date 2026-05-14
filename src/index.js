@@ -1,7 +1,8 @@
 // Bootstraps the Express server, security middleware, API routes, and JSON error handling.
 require("dotenv").config();
 
-const { execSync } = require("child_process");
+const { execFileSync } = require("child_process");
+const fs = require("fs");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -71,13 +72,13 @@ app.get("/", (req, res) => {
 
 app.get("/debug", (req, res) => {
   try {
-    const which = execSync(
-      "which yt-dlp || find /home -name yt-dlp 2>/dev/null",
-    ).toString();
-    const version = execSync(
-      "/home/render/.local/bin/yt-dlp --version",
-    ).toString();
-    res.json({ path: which, version });
+    const renderBinaryPath = "/opt/render/project/src/yt-dlp";
+    const binaryPath =
+      process.env.YTDLP_BINARY && fs.existsSync(process.env.YTDLP_BINARY)
+        ? process.env.YTDLP_BINARY
+        : renderBinaryPath;
+    const version = execFileSync(binaryPath, ["--version"]).toString();
+    res.json({ path: binaryPath, version });
   } catch (e) {
     res.json({ error: e.message });
   }
