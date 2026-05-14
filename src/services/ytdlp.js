@@ -14,7 +14,13 @@ const RENDER_YTDLP_PATH = '/opt/render/project/src/yt-dlp';
 const SYSTEM_YTDLP_PATH = 'yt-dlp';
 const YT_DLP_TIMEOUT_MS = Number(process.env.YT_DLP_TIMEOUT_MS) || 30000;
 const YOUTUBE_COOKIES_PATH = '/tmp/yt-cookies.txt';
-const YOUTUBE_PLAYER_CLIENTS = ['web', 'mweb', 'android', 'ios'];
+const YOUTUBE_EXTRACTOR_ARG_LAYERS = [
+  'youtube:player_client=default,ios,android,web',
+  'youtube:player_client=ios,android,web',
+  'youtube:player_client=mweb,web',
+  'youtube:player_client=web',
+  'youtube:player_client=default,ios,android,web;formats=missing_pot'
+];
 const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'mkv']);
 const AUDIO_EXTENSIONS = new Set(['m4a', 'mp3', 'webm', 'opus', 'aac']);
 
@@ -248,6 +254,10 @@ function buildMediaFormats(formats) {
     .sort(sortMediaFormats);
 }
 
+function hasDownloadableFormats(info) {
+  return Array.isArray(info && info.formats) && info.formats.some(isDownloadableMediaFormat);
+}
+
 function getAvailableResolutions(formats) {
   return Array.from(
     new Set(
@@ -307,22 +317,23 @@ function mapYtDlpError(error) {
   return 'Could not extract video. Try again.';
 }
 
-function buildYtDlpArgs(url, playerClient) {
+function buildYtDlpArgs(url, extractorArgs) {
   const args = [
     url,
     '--dump-single-json',
     '--skip-download',
     '--no-warnings',
     '--no-check-certificate',
-    '--ignore-no-formats-error',
     '--no-check-formats',
-    '--extractor-args',
-    `youtube:player_client=${playerClient};formats=missing_pot`,
     '--add-header',
     'referer:youtube.com',
     '--add-header',
     'user-agent:Mozilla/5.0'
   ];
+
+  if (extractorArgs) {
+    args.push('--extractor-args', extractorArgs);
+  }
 
   return args;
 }
@@ -350,21 +361,26 @@ async function runYtDlpWithArgs(args) {
 }
 
 async function runYtDlp(url, isYouTube = false) {
-  const playerClients = isYouTube ? YOUTUBE_PLAYER_CLIENTS : ['web'];
+  const extractorArgLayers = isYouTube ? YOUTUBE_EXTRACTOR_ARG_LAYERS : [null];
   let lastError;
 
-  for (const playerClient of playerClients) {
-    const args = buildYtDlpArgs(url, playerClient);
+  for (const extractorArgs of extractorArgLayers) {
+    const args = buildYtDlpArgs(url, extractorArgs);
     await addCookiesArgs(args);
 
     try {
       const info = await runYtDlpWithArgs(args);
-      console.log(`yt-dlp layer succeeded with player_client=${playerClient}`);
+
+      if (isYouTube && !hasDownloadableFormats(info)) {
+        throw new Error('yt-dlp returned no downloadable YouTube formats for this extractor layer');
+      }
+
+      console.log(`yt-dlp layer succeeded${extractorArgs ? ` with ${extractorArgs}` : ''}`);
       return info;
     } catch (error) {
       lastError = error;
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`yt-dlp failed with player_client=${playerClient}: ${message}`);
+      console.error(`yt-dlp failed${extractorArgs ? ` with ${extractorArgs}` : ''}: ${message}`);
     }
   }
 

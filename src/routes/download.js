@@ -12,6 +12,7 @@ let ffmpegAvailable;
 
 const YT_DLP_METADATA_TIMEOUT_MS = Number(process.env.YT_DLP_METADATA_TIMEOUT_MS) || 30000;
 const CONTENT_LENGTH_HEAD_TIMEOUT_MS = Number(process.env.CONTENT_LENGTH_HEAD_TIMEOUT_MS) || 8000;
+const YOUTUBE_EXTRACTOR_ARGS = 'youtube:player_client=default,ios,android,web';
 
 function resolveYtDlpPath() {
   if (process.env.YTDLP_BINARY) {
@@ -81,7 +82,7 @@ function buildYtDlpArgs(url, audioOnly) {
   ];
 
   if (isYouTubeUrl(url)) {
-    args.push('--extractor-args', 'youtube:player_client=web');
+    args.push('--extractor-args', YOUTUBE_EXTRACTOR_ARGS);
   }
 
   return args;
@@ -99,7 +100,7 @@ function buildYtDlpMetadataArgs(url, audioOnly) {
   ];
 
   if (isYouTubeUrl(url)) {
-    args.push('--extractor-args', 'youtube:player_client=web');
+    args.push('--extractor-args', YOUTUBE_EXTRACTOR_ARGS);
   }
 
   return args;

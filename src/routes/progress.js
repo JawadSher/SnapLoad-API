@@ -14,6 +14,7 @@ const router = express.Router();
 
 const RENDER_YTDLP_PATH = '/opt/render/project/src/yt-dlp';
 const SYSTEM_YTDLP_PATH = 'yt-dlp';
+const YOUTUBE_EXTRACTOR_ARGS = 'youtube:player_client=default,ios,android,web';
 
 function resolveYtDlpPath() {
   if (process.env.YTDLP_BINARY) {
@@ -69,7 +70,7 @@ function buildYtDlpArgs(url, fileId, audioOnly) {
   ];
 
   if (isYouTubeUrl(url)) {
-    args.push('--extractor-args', 'youtube:player_client=web');
+    args.push('--extractor-args', YOUTUBE_EXTRACTOR_ARGS);
   }
 
   if (audioOnly) {
