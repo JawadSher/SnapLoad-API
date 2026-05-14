@@ -1,6 +1,8 @@
+// Make sure YTDLP_BINARY env variable is set on Render dashboard to: /opt/render/project/src/yt-dlp
 // Runs yt-dlp and normalizes extractor metadata into the SnapLoad API response shape.
 const { execFile } = require('child_process');
-const fs = require('fs/promises');
+const fs = require('fs');
+const fsPromises = require('fs/promises');
 const { promisify } = require('util');
 
 const { formatDuration } = require('../utils/formatDuration');
@@ -8,14 +10,23 @@ const { formatSize } = require('../utils/formatSize');
 const { detectPlatform } = require('../utils/detectPlatform');
 
 const execFileAsync = promisify(execFile);
-const YTDLP_PATH = process.env.YTDLP_BINARY || 'yt-dlp';
+const YTDLP_PATH = process.env.YTDLP_BINARY || '/opt/render/project/src/yt-dlp';
 const YT_DLP_TIMEOUT_MS = Number(process.env.YT_DLP_TIMEOUT_MS) || 30000;
 const YOUTUBE_COOKIES_PATH = '/tmp/yt-cookies.txt';
+
+if (fs.existsSync(YTDLP_PATH)) {
+  console.log('yt-dlp binary found at:', YTDLP_PATH);
+} else {
+  console.error('yt-dlp binary NOT found at:', YTDLP_PATH);
+}
+
 const INVIDIOUS_INSTANCES = [
-  'https://inv.nadeko.net',
-  'https://invidious.nerdvpn.de',
-  'https://invidious.privacydev.net',
-  'https://yt.cdaut.de'
+  'https://invidious.io.lol',
+  'https://invidious.fdn.fr',
+  'https://invidious.perennialte.ch',
+  'https://iv.melmac.space',
+  'https://invidious.reallyaweso.me',
+  'https://invidious.darkness.services'
 ];
 
 const QUALITY_LABELS = new Map([
@@ -219,7 +230,7 @@ function buildInvidiousFormats(info) {
 
 async function fetchInvidiousJson(instance, videoId) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeout = setTimeout(() => controller.abort(), 15000);
 
   try {
     const response = await fetch(`${instance}/api/v1/videos/${videoId}`, {
@@ -316,7 +327,7 @@ async function runYtDlp(url) {
   ];
 
   if (process.env.YOUTUBE_COOKIES) {
-    await fs.writeFile(YOUTUBE_COOKIES_PATH, process.env.YOUTUBE_COOKIES, 'utf8');
+    await fsPromises.writeFile(YOUTUBE_COOKIES_PATH, process.env.YOUTUBE_COOKIES, 'utf8');
     args.push('--cookies', YOUTUBE_COOKIES_PATH);
   }
 
