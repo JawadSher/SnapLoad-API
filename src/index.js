@@ -91,10 +91,10 @@ app.get("/debug", (req, res) => {
 });
 
 app.use("/ping", pingRoute);
+app.use("/api/download", downloadRoute);
 app.use("/api", apiKeyMiddleware);
 app.use("/api/extract", extractRoute);
 app.use("/api/info", infoRoute);
-app.use("/api/download", downloadRoute);
 
 app.use((req, res) => {
   res.status(404).json({
