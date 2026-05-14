@@ -10,9 +10,28 @@ const { formatSize } = require('../utils/formatSize');
 const { detectPlatform } = require('../utils/detectPlatform');
 
 const execFileAsync = promisify(execFile);
-const YTDLP_PATH = process.env.YTDLP_BINARY || '/opt/render/project/src/yt-dlp';
+const RENDER_YTDLP_PATH = '/opt/render/project/src/yt-dlp';
+const SYSTEM_YTDLP_PATH = 'yt-dlp';
 const YT_DLP_TIMEOUT_MS = Number(process.env.YT_DLP_TIMEOUT_MS) || 30000;
 const YOUTUBE_COOKIES_PATH = '/tmp/yt-cookies.txt';
+
+function resolveYtDlpPath() {
+  if (process.env.YTDLP_BINARY) {
+    if (fs.existsSync(process.env.YTDLP_BINARY)) {
+      return process.env.YTDLP_BINARY;
+    }
+
+    console.error('YTDLP_BINARY path does not exist, falling back:', process.env.YTDLP_BINARY);
+  }
+
+  if (fs.existsSync(RENDER_YTDLP_PATH)) {
+    return RENDER_YTDLP_PATH;
+  }
+
+  return SYSTEM_YTDLP_PATH;
+}
+
+const YTDLP_PATH = resolveYtDlpPath();
 
 if (fs.existsSync(YTDLP_PATH)) {
   console.log('yt-dlp binary found at:', YTDLP_PATH);
@@ -283,7 +302,7 @@ function mapYtDlpError(error) {
   const message = String(error && (error.stderr || error.stdout || error.message || error)).toLowerCase();
 
   if (message.includes('enoent') || message.includes('not found')) {
-    return 'yt-dlp is not installed on the server';
+    return `yt-dlp binary was not found at ${YTDLP_PATH}`;
   }
 
   if (message.includes('sign in')) {
