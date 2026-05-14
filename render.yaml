@@ -1,13 +1,14 @@
-# Render.com service definition for the SnapLoad API.
 services:
   - type: web
     name: snapload-api
-    env: node
+    runtime: node
     plan: free
-    buildCommand: npm install && pip3 install yt-dlp
+    buildCommand: pip3 install yt-dlp && npm install
     startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
       - key: API_KEY
         generateValue: true
+      - key: YTDLP_BINARY
+        value: /home/render/.local/bin/yt-dlp
