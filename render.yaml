@@ -3,7 +3,11 @@ services:
     name: snapload-api
     runtime: node
     plan: free
-    buildCommand: pip3 install yt-dlp && npm install
+    buildCommand: >
+      npm install &&
+      curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp
+      -o /opt/render/project/src/yt-dlp &&
+      chmod +x /opt/render/project/src/yt-dlp
     startCommand: npm start
     envVars:
       - key: NODE_ENV
@@ -11,4 +15,4 @@ services:
       - key: API_KEY
         generateValue: true
       - key: YTDLP_BINARY
-        value: /home/render/.local/bin/yt-dlp
+        value: /opt/render/project/src/yt-dlp

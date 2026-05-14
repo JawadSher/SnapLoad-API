@@ -7,7 +7,7 @@ const { formatSize } = require('../utils/formatSize');
 const { detectPlatform } = require('../utils/detectPlatform');
 
 const execFileAsync = promisify(execFile);
-const YTDLP_PATH = process.env.YTDLP_BINARY || 'yt-dlp';
+const YTDLP_PATH = process.env.YTDLP_BINARY || '/opt/render/project/src/yt-dlp'
 const YT_DLP_TIMEOUT_MS = Number(process.env.YT_DLP_TIMEOUT_MS) || 30000;
 
 const QUALITY_LABELS = new Map([
