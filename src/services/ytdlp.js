@@ -40,15 +40,6 @@ if (fs.existsSync(YTDLP_PATH)) {
   console.error('yt-dlp binary NOT found at:', YTDLP_PATH);
 }
 
-const INVIDIOUS_INSTANCES = [
-  'https://invidious.io.lol',
-  'https://invidious.fdn.fr',
-  'https://invidious.perennialte.ch',
-  'https://iv.melmac.space',
-  'https://invidious.reallyaweso.me',
-  'https://invidious.darkness.services'
-];
-
 const QUALITY_LABELS = new Map([
   [2160, '4K'],
   [1440, '1440p'],
@@ -153,6 +144,114 @@ function buildAudioFormat(formats) {
   };
 }
 
+function getFileSizeBytes(format) {
+  const size = Number(format.filesize || format.filesize_approx || format.contentLength);
+  return Number.isFinite(size) && size > 0 ? size : null;
+}
+
+function getFormatType(format) {
+  const hasVideo = format.vcodec && format.vcodec !== 'none';
+  const hasAudio = format.acodec && format.acodec !== 'none';
+
+  if (hasVideo && hasAudio) {
+    return 'video+audio';
+  }
+
+  if (hasVideo) {
+    return 'video';
+  }
+
+  if (hasAudio) {
+    return 'audio';
+  }
+
+  return 'unknown';
+}
+
+function buildDetailedFormats(formats) {
+  const seen = new Set();
+
+  return formats
+    .filter((format) => format && format.url)
+    .map((format) => {
+      const type = getFormatType(format);
+      const quality = format.height ? getQualityLabel(format.height) : (format.format_note || format.quality || type);
+      const ext = format.ext || 'mp4';
+      const sizeBytes = getFileSizeBytes(format);
+
+      return {
+        formatId: format.format_id || '',
+        quality: String(quality),
+        resolution: format.resolution || (format.width && format.height ? `${format.width}x${format.height}` : ''),
+        width: format.width || null,
+        height: format.height || null,
+        fps: format.fps || null,
+        format: ext,
+        ext,
+        type,
+        url: format.url,
+        fileSize: formatSize(sizeBytes),
+        fileSizeBytes: sizeBytes,
+        bitrate: format.tbr || format.vbr || format.abr || null,
+        videoBitrate: format.vbr || null,
+        audioBitrate: format.abr || null,
+        vcodec: format.vcodec || 'none',
+        acodec: format.acodec || 'none',
+        protocol: format.protocol || '',
+        isAudio: type === 'audio',
+        hasVideo: type === 'video' || type === 'video+audio',
+        hasAudio: type === 'audio' || type === 'video+audio',
+        label: `${quality} ${ext.toUpperCase()}${type === 'audio' ? ' Audio' : ''}`
+      };
+    })
+    .filter((format) => {
+      const key = `${format.formatId}:${format.url}`;
+
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => {
+      if (a.isAudio !== b.isAudio) {
+        return a.isAudio ? 1 : -1;
+      }
+
+      return (Number(b.height) || 0) - (Number(a.height) || 0) || (Number(b.bitrate) || 0) - (Number(a.bitrate) || 0);
+    });
+}
+
+function getAvailableResolutions(formats) {
+  return Array.from(
+    new Set(
+      formats
+        .filter((format) => format.hasVideo && format.height)
+        .map((format) => format.quality)
+    )
+  ).sort((a, b) => qualityRank(b) - qualityRank(a));
+}
+
+function getEstimatedTotalSize(formats) {
+  const combinedSizes = formats
+    .filter((format) => format.type === 'video+audio' && format.fileSizeBytes)
+    .map((format) => format.fileSizeBytes);
+
+  if (combinedSizes.length > 0) {
+    return Math.max(...combinedSizes);
+  }
+
+  const bestVideo = formats.find((format) => format.type === 'video' && format.fileSizeBytes);
+  const bestAudio = formats.find((format) => format.type === 'audio' && format.fileSizeBytes);
+
+  if (bestVideo && bestAudio) {
+    return bestVideo.fileSizeBytes + bestAudio.fileSizeBytes;
+  }
+
+  return null;
+}
+
 function buildFallbackFormat(info) {
   if (!info || !info.url) {
     return null;
@@ -168,135 +267,6 @@ function buildFallbackFormat(info) {
     isAudio: false,
     label: `Best ${ext.toUpperCase()}`
   };
-}
-
-function getFormatExtension(format) {
-  if (format.container) {
-    return String(format.container).split(',')[0].trim();
-  }
-
-  if (format.type) {
-    const mimeType = String(format.type).split(';')[0];
-    const extension = mimeType.split('/')[1];
-    return extension || 'mp4';
-  }
-
-  return 'mp4';
-}
-
-function buildInvidiousFormats(info) {
-  const sourceFormats = [
-    ...(Array.isArray(info.formatStreams) ? info.formatStreams : []),
-    ...(Array.isArray(info.adaptiveFormats) ? info.adaptiveFormats : [])
-  ];
-  const byQuality = new Map();
-
-  sourceFormats
-    .filter((format) => format && format.url)
-    .filter((format) => String(format.type || '').includes('video/mp4'))
-    .filter((format) => format.qualityLabel)
-    .forEach((format) => {
-      const quality = String(format.qualityLabel);
-
-      if (!byQuality.has(quality)) {
-        const ext = getFormatExtension(format);
-
-        byQuality.set(quality, {
-          quality,
-          format: ext,
-          url: format.url,
-          fileSize: formatSize(format.contentLength),
-          isAudio: false,
-          label: `${quality} ${ext.toUpperCase()}`
-        });
-      }
-    });
-
-  const bestAudio = sourceFormats
-    .filter((format) => format && format.url)
-    .filter((format) => String(format.type || '').includes('audio'))
-    .sort((a, b) => (Number(b.bitrate) || 0) - (Number(a.bitrate) || 0))[0];
-
-  const formats = Array.from(byQuality.values());
-
-  if (bestAudio) {
-    const ext = getFormatExtension(bestAudio);
-    const quality = bestAudio.qualityLabel || bestAudio.quality || 'audio';
-
-    formats.push({
-      quality: 'audio',
-      format: ext,
-      url: bestAudio.url,
-      fileSize: formatSize(bestAudio.contentLength),
-      isAudio: true,
-      label: `${quality} ${ext.toUpperCase()}`
-    });
-  }
-
-  formats.sort((a, b) => {
-    if (a.isAudio) {
-      return 1;
-    }
-
-    if (b.isAudio) {
-      return -1;
-    }
-
-    return qualityRank(b.quality) - qualityRank(a.quality);
-  });
-
-  return formats;
-}
-
-async function fetchInvidiousJson(instance, videoId) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-
-  try {
-    const response = await fetch(`${instance}/api/v1/videos/${videoId}`, {
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      throw new Error(`Invidious returned ${response.status}`);
-    }
-
-    return await response.json();
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function runInvidious(videoId) {
-  for (const instance of INVIDIOUS_INSTANCES) {
-    try {
-      const info = await fetchInvidiousJson(instance, videoId);
-      const thumbnails = Array.isArray(info.videoThumbnails) ? info.videoThumbnails : [];
-      const thumbnail = thumbnails.length > 0 ? thumbnails[thumbnails.length - 1].url : '';
-      const formats = buildInvidiousFormats(info);
-
-      if (formats.length === 0) {
-        throw new Error('Invidious returned no usable formats');
-      }
-
-      console.log(`Invidious layer succeeded with ${instance}`);
-
-      return {
-        success: true,
-        platform: 'youtube',
-        title: info.title || 'Untitled video',
-        thumbnail,
-        duration: formatDuration(info.lengthSeconds),
-        uploader: info.author || '',
-        formats
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`Invidious instance failed (${instance}): ${message}`);
-    }
-  }
-
-  return null;
 }
 
 function mapYtDlpError(error) {
@@ -339,9 +309,7 @@ function buildYtDlpArgs(url, playerClient) {
     '--ignore-no-formats-error',
     '--no-check-formats',
     '--extractor-args',
-    `youtube:player_client=${playerClient}`,
-    '--extractor-args',
-    'youtube:player_skip=webpage',
+    `youtube:player_client=${playerClient};formats=missing_pot`,
     '--add-header',
     'referer:youtube.com',
     '--add-header',
@@ -398,26 +366,16 @@ async function runYtDlp(url, isYouTube = false) {
 async function extractVideoInfo(url, options = {}) {
   try {
     const videoId = extractYouTubeVideoId(url);
-
-    if (videoId) {
-      const invidiousResult = await runInvidious(videoId);
-
-      if (invidiousResult) {
-        return invidiousResult;
-      }
-
-      console.log('Invidious layer failed, falling back to yt-dlp layer');
-    }
-
     const info = await runYtDlp(url, Boolean(videoId));
     console.log(videoId ? 'yt-dlp YouTube fallback layer succeeded' : 'yt-dlp layer succeeded');
 
     const rawFormats = Array.isArray(info.formats) ? info.formats : [];
     const videoFormats = buildVideoFormats(rawFormats);
     const audioFormat = buildAudioFormat(rawFormats);
-    const formats = [...videoFormats];
+    const detailedFormats = buildDetailedFormats(rawFormats);
+    const formats = detailedFormats.length > 0 ? detailedFormats : [...videoFormats];
 
-    if (audioFormat) {
+    if (detailedFormats.length === 0 && audioFormat) {
       formats.push(audioFormat);
     }
 
@@ -431,13 +389,43 @@ async function extractVideoInfo(url, options = {}) {
 
     formats.sort((a, b) => qualityRank(b.quality) - qualityRank(a.quality));
 
+    const estimatedTotalSizeBytes = getEstimatedTotalSize(detailedFormats);
+    const thumbnails = Array.isArray(info.thumbnails) ? info.thumbnails : [];
+
     return {
       success: true,
       platform: info.extractor_key ? String(info.extractor_key).toLowerCase() : detectPlatform(url),
+      id: info.id || '',
       title: info.title || 'Untitled video',
+      description: info.description || '',
       thumbnail: info.thumbnail || '',
+      thumbnails,
       duration: formatDuration(info.duration),
+      durationSeconds: info.duration || 0,
       uploader: info.uploader || info.channel || '',
+      uploaderId: info.uploader_id || info.channel_id || '',
+      channel: info.channel || info.uploader || '',
+      channelId: info.channel_id || '',
+      channelUrl: info.channel_url || '',
+      webpageUrl: info.webpage_url || info.original_url || url,
+      originalUrl: info.original_url || url,
+      uploadDate: info.upload_date || '',
+      releaseDate: info.release_date || '',
+      viewCount: info.view_count || 0,
+      likeCount: info.like_count || 0,
+      commentCount: info.comment_count || 0,
+      categories: Array.isArray(info.categories) ? info.categories : [],
+      tags: Array.isArray(info.tags) ? info.tags : [],
+      ageLimit: info.age_limit || 0,
+      availability: info.availability || '',
+      liveStatus: info.live_status || '',
+      extractor: info.extractor || '',
+      availableResolutions: getAvailableResolutions(detailedFormats),
+      totalFormats: detailedFormats.length,
+      videoFormats: detailedFormats.filter((format) => format.hasVideo),
+      audioFormats: detailedFormats.filter((format) => format.isAudio),
+      estimatedTotalSize: formatSize(estimatedTotalSizeBytes),
+      estimatedTotalSizeBytes,
       formats
     };
   } catch (err) {
