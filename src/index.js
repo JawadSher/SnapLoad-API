@@ -4,7 +4,6 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 
 const pingRoute = require('./routes/ping');
 const extractRoute = require('./routes/extract');
@@ -13,26 +12,13 @@ const infoRoute = require('./routes/info');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({
   origin: '*',
   allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key']
 }));
 app.use(express.json({ limit: '10kb' }));
-
-const apiLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  limit: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res) => {
-    res.status(429).json({
-      success: false,
-      error: 'Too many requests',
-      type: 'rate_limit_error'
-    });
-  }
-});
 
 function apiKeyMiddleware(req, res, next) {
   const requiredApiKey = process.env.API_KEY;
@@ -69,7 +55,7 @@ app.get('/', (req, res) => {
 });
 
 app.use('/ping', pingRoute);
-app.use('/api', apiLimiter, apiKeyMiddleware);
+app.use('/api', apiKeyMiddleware);
 app.use('/api/extract', extractRoute);
 app.use('/api/info', infoRoute);
 
