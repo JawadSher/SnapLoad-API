@@ -11,6 +11,9 @@ const pingRoute = require("./routes/ping");
 const extractRoute = require("./routes/extract");
 const infoRoute = require("./routes/info");
 const downloadRoute = require("./routes/download");
+const progressRoute = require("./routes/progress");
+const fileRoute = require("./routes/file");
+const { startTempFileCleanup } = require("./utils/tempFiles");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -72,6 +75,21 @@ app.get("/", (req, res) => {
         path: "/api/download?url=VIDEO_URL&quality=best&format=mp4&audioOnly=false",
         description: "Stream a video page URL through yt-dlp as an attachment",
       },
+      {
+        method: "GET",
+        path: "/api/progress?url=VIDEO_URL&quality=best&format=mp4&audioOnly=false",
+        description: "Track a temp-file yt-dlp download with Server Sent Events",
+      },
+      {
+        method: "GET",
+        path: "/api/file/:fileId",
+        description: "Download a completed temp file and delete it after serving",
+      },
+      {
+        method: "DELETE",
+        path: "/api/file/:fileId",
+        description: "Delete a completed temp file manually",
+      },
     ],
   });
 });
@@ -92,6 +110,8 @@ app.get("/debug", (req, res) => {
 
 app.use("/ping", pingRoute);
 app.use("/api/download", downloadRoute);
+app.use("/api/progress", progressRoute);
+app.use("/api/file", fileRoute);
 app.use("/api", apiKeyMiddleware);
 app.use("/api/extract", extractRoute);
 app.use("/api/info", infoRoute);
@@ -116,6 +136,8 @@ app.use((err, req, res, next) => {
     type: err.type || (isClientError ? "request_error" : "server_error"),
   });
 });
+
+startTempFileCleanup();
 
 app.listen(PORT, () => {
   console.log(`SnapLoad API running on port ${PORT}`);
