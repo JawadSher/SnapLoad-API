@@ -1,14 +1,13 @@
 // Runs yt-dlp and normalizes extractor metadata into the SnapLoad API response shape.
 const { execFile } = require('child_process');
 const { promisify } = require('util');
-const { YOUTUBE_DL_PATH } = require('yt-dlp-exec/src/constants');
 
 const { formatDuration } = require('../utils/formatDuration');
 const { formatSize } = require('../utils/formatSize');
 const { detectPlatform } = require('../utils/detectPlatform');
 
 const execFileAsync = promisify(execFile);
-const YT_DLP_BINARY = process.env.YT_DLP_PATH || YOUTUBE_DL_PATH;
+const YTDLP_PATH = process.env.YTDLP_BINARY || 'yt-dlp';
 const YT_DLP_TIMEOUT_MS = Number(process.env.YT_DLP_TIMEOUT_MS) || 30000;
 
 const QUALITY_LABELS = new Map([
@@ -146,14 +145,13 @@ async function runYtDlp(url) {
     '--no-call-home',
     '--no-check-certificate',
     '--prefer-free-formats',
-    '--youtube-skip-dash-manifest',
     '--add-header',
     'referer:youtube.com',
     '--add-header',
     'user-agent:Mozilla/5.0'
   ];
 
-  const { stdout } = await execFileAsync(YT_DLP_BINARY, args, {
+  const { stdout } = await execFileAsync(YTDLP_PATH, args, {
     timeout: YT_DLP_TIMEOUT_MS,
     maxBuffer: 10 * 1024 * 1024
   });

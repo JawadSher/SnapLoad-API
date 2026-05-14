@@ -4,8 +4,8 @@ services:
     name: snapload-api
     env: node
     plan: free
-    buildCommand: python3 -m pip install --user --upgrade yt-dlp && npm install --omit=dev
-    startCommand: export PATH="$HOME/.local/bin:$PATH" && npm start
+    buildCommand: npm install && pip3 install yt-dlp
+    startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
