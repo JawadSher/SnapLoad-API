@@ -15,6 +15,8 @@ const SYSTEM_YTDLP_PATH = 'yt-dlp';
 const YT_DLP_TIMEOUT_MS = Number(process.env.YT_DLP_TIMEOUT_MS) || 30000;
 const YOUTUBE_COOKIES_PATH = '/tmp/yt-cookies.txt';
 const YOUTUBE_PLAYER_CLIENTS = ['web', 'mweb', 'android', 'ios'];
+const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'mkv']);
+const AUDIO_EXTENSIONS = new Set(['m4a', 'mp3', 'webm', 'opus', 'aac']);
 
 function resolveYtDlpPath() {
   if (process.env.YTDLP_BINARY) {
@@ -96,54 +98,6 @@ function extractYouTubeVideoId(url) {
   }
 }
 
-function buildVideoFormats(formats) {
-  const byQuality = new Map();
-
-  formats
-    .filter((format) => format && format.url)
-    .filter((format) => format.vcodec && format.vcodec !== 'none')
-    .filter((format) => format.acodec && format.acodec !== 'none')
-    .filter((format) => format.height)
-    .forEach((format) => {
-      const quality = getQualityLabel(format.height);
-
-      if (!byQuality.has(quality)) {
-        const ext = format.ext || 'mp4';
-
-        byQuality.set(quality, {
-          quality,
-          format: ext,
-          url: format.url,
-          fileSize: formatSize(format.filesize || format.filesize_approx),
-          isAudio: false,
-          label: `${quality} ${ext.toUpperCase()}`
-        });
-      }
-    });
-
-  return Array.from(byQuality.values());
-}
-
-function buildAudioFormat(formats) {
-  const bestAudio = formats
-    .filter((format) => format && format.url)
-    .filter((format) => format.vcodec === 'none' && format.acodec && format.acodec !== 'none')
-    .sort((a, b) => (Number(b.abr) || 0) - (Number(a.abr) || 0))[0];
-
-  if (!bestAudio) {
-    return null;
-  }
-
-  return {
-    quality: 'audio',
-    format: 'mp3',
-    url: bestAudio.url,
-    fileSize: formatSize(bestAudio.filesize || bestAudio.filesize_approx),
-    isAudio: true,
-    label: 'Audio Only (MP3)'
-  };
-}
-
 function getFileSizeBytes(format) {
   const size = Number(format.filesize || format.filesize_approx || format.contentLength);
   return Number.isFinite(size) && size > 0 ? size : null;
@@ -168,11 +122,68 @@ function getFormatType(format) {
   return 'unknown';
 }
 
-function buildDetailedFormats(formats) {
+function isStoryboardFormat(format) {
+  const ext = String(format.ext || '').toLowerCase();
+  const protocol = String(format.protocol || '').toLowerCase();
+  const description = `${format.format || ''} ${format.format_note || ''}`.toLowerCase();
+
+  return ext === 'mhtml' || protocol === 'mhtml' || description.includes('storyboard');
+}
+
+function isDownloadableMediaFormat(format) {
+  if (!format || !format.url || isStoryboardFormat(format)) {
+    return false;
+  }
+
+  const type = getFormatType(format);
+
+  if (type === 'unknown') {
+    return false;
+  }
+
+  const ext = String(format.ext || '').toLowerCase();
+
+  if (type === 'audio') {
+    return AUDIO_EXTENSIONS.has(ext);
+  }
+
+  return VIDEO_EXTENSIONS.has(ext);
+}
+
+function buildFormatLabel(format) {
+  const ext = String(format.ext || 'mp4').toUpperCase();
+
+  if (format.isAudio) {
+    return `${ext} audio`;
+  }
+
+  if (format.hasVideo && !format.hasAudio) {
+    return `${format.quality} ${ext} video only`;
+  }
+
+  return `${format.quality} ${ext}`;
+}
+
+function sortMediaFormats(a, b) {
+  const aRank = a.hasVideo && a.hasAudio ? 0 : a.hasVideo ? 1 : 2;
+  const bRank = b.hasVideo && b.hasAudio ? 0 : b.hasVideo ? 1 : 2;
+
+  if (aRank !== bRank) {
+    return aRank - bRank;
+  }
+
+  if (aRank === 2) {
+    return (Number(b.audioBitrate) || Number(b.bitrate) || 0) - (Number(a.audioBitrate) || Number(a.bitrate) || 0);
+  }
+
+  return (Number(b.height) || 0) - (Number(a.height) || 0) || (Number(b.bitrate) || 0) - (Number(a.bitrate) || 0);
+}
+
+function buildMediaFormats(formats) {
   const seen = new Set();
 
   return formats
-    .filter((format) => format && format.url)
+    .filter(isDownloadableMediaFormat)
     .map((format) => {
       const type = getFormatType(format);
       const quality = format.height ? getQualityLabel(format.height) : (format.format_note || format.quality || type);
@@ -201,11 +212,15 @@ function buildDetailedFormats(formats) {
         isAudio: type === 'audio',
         hasVideo: type === 'video' || type === 'video+audio',
         hasAudio: type === 'audio' || type === 'video+audio',
-        label: `${quality} ${ext.toUpperCase()}${type === 'audio' ? ' Audio' : ''}`
+        label: ''
       };
     })
+    .map((format) => ({
+      ...format,
+      label: buildFormatLabel(format)
+    }))
     .filter((format) => {
-      const key = `${format.formatId}:${format.url}`;
+      const key = `${format.quality}:${format.ext}:${format.isAudio}:${format.hasVideo}:${format.hasAudio}`;
 
       if (seen.has(key)) {
         return false;
@@ -214,13 +229,7 @@ function buildDetailedFormats(formats) {
       seen.add(key);
       return true;
     })
-    .sort((a, b) => {
-      if (a.isAudio !== b.isAudio) {
-        return a.isAudio ? 1 : -1;
-      }
-
-      return (Number(b.height) || 0) - (Number(a.height) || 0) || (Number(b.bitrate) || 0) - (Number(a.bitrate) || 0);
-    });
+    .sort(sortMediaFormats);
 }
 
 function getAvailableResolutions(formats) {
@@ -250,23 +259,6 @@ function getEstimatedTotalSize(formats) {
   }
 
   return null;
-}
-
-function buildFallbackFormat(info) {
-  if (!info || !info.url) {
-    return null;
-  }
-
-  const ext = info.ext || 'mp4';
-
-  return {
-    quality: 'best',
-    format: ext,
-    url: info.url,
-    fileSize: formatSize(info.filesize || info.filesize_approx),
-    isAudio: false,
-    label: `Best ${ext.toUpperCase()}`
-  };
 }
 
 function mapYtDlpError(error) {
@@ -370,26 +362,17 @@ async function extractVideoInfo(url, options = {}) {
     console.log(videoId ? 'yt-dlp YouTube fallback layer succeeded' : 'yt-dlp layer succeeded');
 
     const rawFormats = Array.isArray(info.formats) ? info.formats : [];
-    const videoFormats = buildVideoFormats(rawFormats);
-    const audioFormat = buildAudioFormat(rawFormats);
-    const detailedFormats = buildDetailedFormats(rawFormats);
-    const formats = detailedFormats.length > 0 ? detailedFormats : [...videoFormats];
-
-    if (detailedFormats.length === 0 && audioFormat) {
-      formats.push(audioFormat);
-    }
+    const formats = buildMediaFormats(rawFormats);
 
     if (formats.length === 0) {
-      const fallback = buildFallbackFormat(info);
-
-      if (fallback) {
-        formats.push(fallback);
-      }
+      return {
+        success: false,
+        error: 'No downloadable video or audio formats found',
+        formats: []
+      };
     }
 
-    formats.sort((a, b) => qualityRank(b.quality) - qualityRank(a.quality));
-
-    const estimatedTotalSizeBytes = getEstimatedTotalSize(detailedFormats);
+    const estimatedTotalSizeBytes = getEstimatedTotalSize(formats);
     const thumbnails = Array.isArray(info.thumbnails) ? info.thumbnails : [];
 
     return {
@@ -420,10 +403,10 @@ async function extractVideoInfo(url, options = {}) {
       availability: info.availability || '',
       liveStatus: info.live_status || '',
       extractor: info.extractor || '',
-      availableResolutions: getAvailableResolutions(detailedFormats),
-      totalFormats: detailedFormats.length,
-      videoFormats: detailedFormats.filter((format) => format.hasVideo),
-      audioFormats: detailedFormats.filter((format) => format.isAudio),
+      availableResolutions: getAvailableResolutions(formats),
+      totalFormats: formats.length,
+      videoFormats: formats.filter((format) => format.hasVideo),
+      audioFormats: formats.filter((format) => format.isAudio),
       estimatedTotalSize: formatSize(estimatedTotalSizeBytes),
       estimatedTotalSizeBytes,
       formats
@@ -440,5 +423,9 @@ async function extractVideoInfo(url, options = {}) {
 }
 
 module.exports = {
-  extractVideoInfo
+  extractVideoInfo,
+  _test: {
+    buildMediaFormats,
+    isDownloadableMediaFormat
+  }
 };

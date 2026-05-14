@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "build": "echo \"No build step required\""
+    "build": "echo \"No build step required\"",
+    "test": "node test/ytdlp-format-filter.test.js"
   },
   "keywords": [
     "snapload",
